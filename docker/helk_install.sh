@@ -6,6 +6,10 @@
 # Author: Roberto Rodriguez (@Cyb3rWard0g)
 # License: GPL-3.0
 
+HELK_BUILD_VERSION="v0.1.9-alpha03272020"
+HELK_ELK_VERSION="7.6.2"
+SUBSCRIPTION_CHOICE="basic"
+
 # *********** Helk log tagging variables ***************
 # For more efficient script editing/reading, and also if/when we switch to different install script language
 HELK_INFO_TAG="[HELK-INSTALLATION-INFO]"
@@ -28,6 +32,7 @@ SYSCTL_VM_SWAPPINESS=25
 # *********** Export variables to environment ***************
 export DOCKER_CLIENT_TIMEOUT=300
 export COMPOSE_HTTP_TIMEOUT=300
+export SUBSCRIPTION_CHOICE=${SUBSCRIPTION_CHOICE}
 
 # *********** Check if user is root ***************
 if [[ $EUID -ne 0 ]]; then
@@ -60,7 +65,7 @@ persist_conf() {
     mkdir -p $HELK_DIR >>$LOGFILE 2>&1
   fi
 
-  COMPOSE_CONFIG="${HELK_BUILD}-${SUBSCRIPTION_CHOICE}.yml"
+  COMPOSE_CONFIG="${HELK_BUILD}-basic.yml"
   #TODO: add check if CentOS if selinux is enabled and if enforcement mode or note
 
   if [[ -f $HELK_CONF_FILE ]]; then
@@ -291,36 +296,6 @@ install_docker_compose() {
   fi
 }
 
-# *********** Set helk elasticsearch password ******************************
-set_elasticsearch_password() {
-  if [[ -z "$ELASTICSEARCH_PASSWORD_INPUT" ]] && [[ $SUBSCRIPTION_CHOICE == "trial" ]]; then
-    echo -e "\n$HELK_INFO_TAG Please make sure to create a custom Elasticsearch password and store it securely for future use."
-    sleep 1
-    while true; do
-      read -t 90 -p "$HELK_INFO_TAG Set HELK Elasticsearch Password: " -e -i "elasticpassword" ELASTICSEARCH_PASSWORD_INPUT
-      READ_INPUT=$?
-      ELASTICSEARCH_PASSWORD_INPUT=${ELASTICSEARCH_PASSWORD_INPUT:-"elasticpassword"}
-      if [ $READ_INPUT = 142 ]; then
-        echo -e "\n$HELK_INFO_TAG HELK elasticsearch password set to ${ELASTICSEARCH_PASSWORD_INPUT}"
-        break
-      else
-        read -p "$HELK_INFO_TAG Verify HELK Elasticsearch Password: " ELASTICSEARCH_PASSWORD_INPUT_VERIFIED
-        echo -e "$HELK_INFO_TAG HELK elasticsearch password set to ${ELASTICSEARCH_PASSWORD_INPUT}"
-        # *********** Validating Password Input ***************
-        if [[ "$ELASTICSEARCH_PASSWORD_INPUT" == "$ELASTICSEARCH_PASSWORD_INPUT_VERIFIED" ]]; then
-          break
-        else
-          echo -e "${RED}Error...${STD}"
-          echo "$HELK_INFO_TAG Your password values do not match.."
-        fi
-      fi
-    done
-    export ELASTIC_PASSWORD=$ELASTICSEARCH_PASSWORD_INPUT
-  elif [[ "$ELASTICSEARCH_PASSWORD_INPUT" ]] && [[ $SUBSCRIPTION_CHOICE == "trial" ]]; then
-    export ELASTIC_PASSWORD=$ELASTICSEARCH_PASSWORD_INPUT
-  fi
-}
-
 # *********** Set helk kibana UI password ******************************
 set_kibana_ui_password() {
   if [[ -z "$KIBANA_UI_PASSWORD_INPUT" ]]; then
@@ -358,8 +333,6 @@ set_kibana_ui_password() {
       echoerror "Could not add helk to htpasswd.users file (Error Code: $ERROR)."
       exit 1
     fi
-  elif [[ $SUBSCRIPTION_CHOICE == "trial" ]]; then
-    export KIBANA_UI_PASSWORD=$KIBANA_UI_PASSWORD_INPUT
   else
     echo "$HELK_INFO_TAG Subscription Choice MUST be provided first.."
     exit 1
@@ -402,32 +375,6 @@ build_helk() {
   if [ $ERROR -ne 0 ]; then
     echoerror "Could not run HELK via docker-compose file $COMPOSE_CONFIG (Error Code: $ERROR)."
     exit 1
-  fi
-}
-
-# *********** Asking user for Basic or Trial subscription of ELK ***************
-set_helk_subscription() {
-  if [[ -z "$SUBSCRIPTION_CHOICE" ]]; then
-    # *********** Accepting Defaults or Allowing user to set HELK subscription ***************
-    while true; do
-      local subscription_input
-      read -t 30 -p "$HELK_INFO_TAG Set HELK elastic subscription (basic or trial): " -e -i "basic" subscription_input
-      READ_INPUT=$?
-      SUBSCRIPTION_CHOICE=${subscription_input:-"basic"}
-      if [ $READ_INPUT = 142 ]; then
-        break
-      else
-        # *********** Validating subscription Input ***************
-        case $SUBSCRIPTION_CHOICE in
-        basic) break ;;
-        trial) break ;;
-        *)
-          echo -e "${RED}Error...${STD}"
-          echo "$HELK_ERROR_TAG Not a valid subscription. Valid Options: basic or trial"
-          ;;
-        esac
-      fi
-    done
   fi
 }
 
@@ -573,14 +520,14 @@ check_logstash_connected() {
 show_banner() {
   # *********** Showing HELK Docker menu options ***************
   echo " "
-  echo "**********************************************"
-  echo "**          HELK - THE HUNTING ELK          **"
-  echo "**                                          **"
-  echo "** Author: Roberto Rodriguez (@Cyb3rWard0g) **"
-  echo "** HELK build version: v0.1.8-alpha01032020 **"
-  echo "** HELK ELK version: 7.5.2                  **"
-  echo "** License: GPL-3.0                         **"
-  echo "**********************************************"
+  echo "***********************************************"
+  echo "**          HELK - THE HUNTING ELK           **"
+  echo "**                                           **"
+  echo "** Author: Roberto Rodriguez (@Cyb3rWard0g)  **"
+  echo "** HELK build version: ${HELK_BUILD_VERSION} **"
+  echo "** HELK ELK version: ${HELK_ELK_VERSION}     **"
+  echo "** License: GPL-3.0                          **"
+  echo "***********************************************"
   echo " "
 }
 
@@ -628,10 +575,8 @@ install_helk() {
   check_min_requirements
   check_system_info
   set_helk_build
-  set_helk_subscription
   set_network
   set_kibana_ui_password
-  set_elasticsearch_password
   prepare_helk
   persist_conf
   set_install_info
@@ -648,15 +593,11 @@ usage() {
   echo "   -p         set helk kibana ui password"
   echo "   -i         set HELKs IP address"
   echo "   -b         set HELKs build (helk-kibana-analysis OR helk-kibana-notebook-analysis)"
-  echo "   -l         set HELKs subscription (basic or trial)"
-  echo "   -e         set HELKs elasticsearch password"
   echo "   -q         quiet -> not output to the console"
   echo
   echo "Examples:"
   echo " $0                                                                                           Install HELK manually"
-  echo " $0 -p As3gur@! -i 192.168.64.131 -b 'helk-kibana-analysis' -l 'basic'                        Install HELK with a basic subscription"
-  echo " $0 -p As3gur@! -i 192.168.64.131 -b 'helk-kibana-analysis' -l 'trial'  -e elasticpasword     Install HELK with a trial subscription"
-  echo " $0 -p As3gur@! -i 192.168.64.131 -b 'helk-kibana-analysis' -l 'basic'  -q                    Install HELK with a basic subscription quietly"
+  echo " $0 -p As3gur@! -i 192.168.64.131 -b 'helk-kibana-analysis'                                   Install HELK quietly"
   echo " "
   exit 1
 }
@@ -670,14 +611,13 @@ do
   p) KIBANA_UI_PASSWORD_INPUT=$OPTARG ;;
   i) HOST_IP=$OPTARG ;;
   b) HELK_BUILD=$OPTARG ;;
-  l) SUBSCRIPTION_CHOICE=$OPTARG ;;
   e) ELASTICSEARCH_PASSWORD_INPUT=$OPTARG ;;
   q) quiet="TRUE" ;;
   \?) usage ;;
   esac
 done
 
-if [ -z "$KIBANA_UI_PASSWORD_INPUT" ] && [ -z "$HOST_IP" ] && [ -z "$HELK_BUILD" ] && [ -z "$SUBSCRIPTION_CHOICE" ]; then
+if [ -z "$KIBANA_UI_PASSWORD_INPUT" ] && [ -z "$HOST_IP" ] && [ -z "$HELK_BUILD" ]; then
   install_helk
 else
   if [[ "$HOST_IP" =~ ^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$ ]]; then
@@ -687,15 +627,6 @@ else
         usage
       fi
     done
-    # *********** Validating subscription Input ***************
-    case $SUBSCRIPTION_CHOICE in
-    basic) ;;
-    trial) ;;
-    *)
-      echo "$HELK_ERROR_TAG Not a valid subscription. Valid Options: basic or trial"
-      usage
-      ;;
-    esac
     # *********** Validating helk build***************
     case $HELK_BUILD in
     helk-kibana-analysis) ;;
